@@ -17,6 +17,7 @@ import { Time } from '../lib/node_utility/Time';
 import { isArray } from 'util';
 import { CmdLineHandler } from './CmdLineHandler';
 import { mergeCppProperties } from './project/cppProperties';
+import { ClangdBackend, ClangdProject, languageService } from './project/clangdBackend';
 import { formatPathValidationErrors, validateExecutionPaths } from './project/pathValidation';
 import { buildTreeItemId, findRevealPath, ProjectSortOrder, sortProjects } from './projectExplorer/treeState';
 
@@ -240,7 +241,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     subscriber.push(vscode.commands.registerCommand('item.copyValue', (item: IView) => vscode.env.clipboard.writeText(item.tooltip || '')));
 
-    subscriber.push(vscode.commands.registerCommand('project.switch', (item: IView) => prjExplorer.switchTargetByProject(item)));
+    subscriber.push(vscode.commands.registerCommand('project.switch', (item?: IView, targetName?: string) => prjExplorer.switchTargetByProject(item, targetName)));
     
     subscriber.push(vscode.commands.registerCommand('project.active', (item: IView) => prjExplorer.activeProject(item)));
 
@@ -812,6 +813,7 @@ abstract class Target implements IView {
     }
 
     private updateCppProperties() {
+        if (languageService() !== 'cpptools') { return; }
 
         // Place c_cpp_properties.json in the project-specific workspace folder (or project dir if no workspace)
         let vscodeDir: string;
@@ -859,6 +861,7 @@ abstract class Target implements IView {
     }
 
     public async applyCppConfigurationSelection(): Promise<void> {
+        if (languageService() !== 'cpptools') { return; }
         try {
             this.updateCppProperties(); // ensure configuration exists and is current
             await vscode.commands.executeCommand('C_Cpp.ConfigurationSelect', this.cppConfigName);
@@ -877,7 +880,7 @@ abstract class Target implements IView {
         const incListStr: string = this.getIncString(this.targetDOM);
         const defineListStr: string = this.getDefineString(this.targetDOM);
         const _groups: any = this.getGroups(this.targetDOM);
-        const sysIncludes = this.getSystemIncludes(this.targetDOM);
+        const sysIncludes = languageService() === 'cpptools' ? this.getSystemIncludes(this.targetDOM) : [];
 
         // set includes
         this.includes.clear();
@@ -905,7 +908,7 @@ abstract class Target implements IView {
         });
 
         // add system macros
-        this.getSysDefines(this.targetDOM).forEach((define) => {
+        (languageService() === 'cpptools' ? this.getSysDefines(this.targetDOM) : []).forEach((define) => {
             this.defines.add(define);
         });
 
@@ -980,6 +983,10 @@ abstract class Target implements IView {
         this.updateCppProperties();
 
         this.updateSourceRefs();
+    }
+
+    public getClangdProject(): ClangdProject {
+        return { projectFile: this.project.uvprjFile.path, targetName: this.targetName, target: this.targetDOM };
     }
 
     private quoteString(str: string, quote = '"'): string {
@@ -1613,7 +1620,6 @@ class ArmTarget extends Target {
 
     constructor(prjInfo: KeilProjectInfo, uvInfo: uVisonInfo, targetDOM: any) {
         super(prjInfo, uvInfo, targetDOM);
-        ArmTarget.initArmclangMacros();
     }
 
     protected checkProject(): Error | undefined {
@@ -1689,6 +1695,7 @@ class ArmTarget extends Target {
 
     protected getSysDefines(target: any): string[] {
         if (target['uAC6'] === '1') { // ARMClang
+            ArmTarget.initArmclangMacros();
             return ArmTarget.armclangMacros.concat(ArmTarget.armclangBuildinMacros || []);
         } else { // ARMCC
             return ArmTarget.armccMacros;
@@ -1932,10 +1939,32 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
     private restoreExpandedStateTimer: NodeJS.Timeout | undefined;
 
     private extensionContext: vscode.ExtensionContext; // Store context
+    private readonly clangdBackend: ClangdBackend;
 
     constructor(context: vscode.ExtensionContext) {
         this.extensionContext = context; // Store context
         this.prjList = new Map();
+        this.clangdBackend = new ClangdBackend(context);
+        context.subscriptions.push(vscode.commands.registerCommand('keilClangd.selectBackend', async () => {
+            const selected = await vscode.window.showQuickPick(['clangd', 'cpptools', 'none'], {
+                placeHolder: 'Select language service for this workspace (clangd manages workspace arguments and disables C/C++ IntelliSense)'
+            });
+            if (selected) {
+                await vscode.workspace.getConfiguration('KeilAssistant').update('LanguageService', selected, vscode.ConfigurationTarget.Workspace);
+            }
+        }));
+        context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {
+            if (!event.affectsConfiguration('KeilAssistant')) { return; }
+            try {
+                if (event.affectsConfiguration('KeilAssistant.LanguageService')) {
+                    for (const project of this.prjList.values()) {
+                        for (const target of project.getTargets()) { await target.load(); }
+                    }
+                    await this.currentActiveProject?.applyActiveCppConfiguration();
+                }
+                this.updateView();
+            } catch (error) { showMessage(String(error), 'error'); }
+        }));
         this.viewEvent = new vscode.EventEmitter<IView | undefined | null>();
         this.onDidChangeTreeData = this.viewEvent.event;
         this.treeView = vscode.window.createTreeView('project', { treeDataProvider: this });
@@ -2440,11 +2469,14 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
         }
     }
 
-    async switchTargetByProject(view: IView) {
-        const prj = this.prjList.get(view.prjID);
+    async switchTargetByProject(view?: IView, requestedTarget?: string) {
+        const prj = view ? this.prjList.get(view.prjID) : this.currentActiveProject;
         if (prj) {
             const tList = prj.getTargets();
-            const targetName = await vscode.window.showQuickPick(tList.map((ele) => { return ele.targetName; }), {
+            if (requestedTarget && !tList.some(target => target.targetName === requestedTarget)) {
+                throw new Error('Unknown Keil target: ' + requestedTarget);
+            }
+            const targetName = requestedTarget || await vscode.window.showQuickPick(tList.map((ele) => { return ele.targetName; }), {
                 canPickMany: false,
                 placeHolder: 'please select a target name for keil project'
             });
@@ -2478,6 +2510,12 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
     }
 
     updateView() {
+        this.clangdBackend.schedule(() => {
+            const projects = Array.from(this.prjList.values()).filter(project => project !== this.currentActiveProject);
+            if (this.currentActiveProject) { projects.push(this.currentActiveProject); }
+            return projects.map(project => project.getActiveTarget()?.getClangdProject())
+                .filter((project): project is ClangdProject => project !== undefined);
+        });
         this.viewEvent.fire(undefined); // Pass undefined as argument
         this.scheduleRestoreExpandedState();
     }
@@ -2586,6 +2624,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
     }
 
     dispose() {
+        this.clangdBackend.dispose();
         // Dispose of any resources managed by ProjectExplorer itself, if any.
         // TreeDataProvider and Commands pushed to context.subscriptions are disposed by VSCode.
         if (this.restoreExpandedStateTimer) {

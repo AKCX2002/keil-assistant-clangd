@@ -1,11 +1,11 @@
 {
-    "name": "keil-assistant-new",
-    "displayName": "Keil Assistant Community Fork",
-    "description": "A community-maintained fork of the original Keil Assistant for VS Code",
-    "version": "2.5.2",
-    "publisher": "candycium",
+    "name": "keil-assistant-clangd",
+    "displayName": "Keil Assistant clangd (Personal)",
+    "description": "Unofficial personal-use modifications of Keil Assistant with an optional clangd backend",
+    "version": "0.1.0",
+    "publisher": "AKCX2002",
     "author": {
-        "name": "Rui Wang"
+        "name": "AKCX2002"
     },
     "keywords": [
         "keil",
@@ -15,7 +15,7 @@
         "stm32",
         "arm"
     ],
-    "homepage": "https://github.com/ruiwarn/keil-assistant",
+    "homepage": "https://github.com/AKCX2002/keil-assistant-clangd",
     "engines": {
         "vscode": "^1.85.0"
     },
@@ -32,29 +32,28 @@
         "onLanguageModelTool:build_keil_project",
         "onLanguageModelTool:get_keil_project_info"
     ],
-    "icon": "res/icons/icon.png",
     "main": "./dist/extension.js",
     "repository": {
         "type": "git",
-        "url": "https://github.com/ruiwarn/keil-assistant"
+        "url": "https://github.com/AKCX2002/keil-assistant-clangd"
     },
     "bugs": {
-        "url": "https://github.com/ruiwarn/keil-assistant/issues"
+        "url": "https://github.com/AKCX2002/keil-assistant-clangd/issues"
     },
     "contributes": {
         "configuration": [
             {
-                "title": "Keil Assistant Community Fork",
+                "title": "Keil Assistant clangd (Personal)",
                 "properties": {
                     "KeilAssistant.C51.Uv4Path": {
                         "type": "string",
-                        "scope": "machine",
+                        "scope": "machine-overridable",
                         "markdownDescription": "C51 UV4.exe 的绝对路径。例如：`C:\\Keil_v5\\UV4\\UV4.exe`\n\n请确保设置正确的路径，否则插件将无法正常工作。",
                         "default": ""
                     },
                     "KeilAssistant.MDK.Uv4Path": {
                         "type": "string",
-                        "scope": "machine",
+                        "scope": "machine-overridable",
                         "markdownDescription": "MDK UV4.exe 的绝对路径。例如：`C:\\Keil_v5\\UV4\\UV4.exe`\n\n请确保设置正确的路径，否则插件将无法正常工作。",
                         "default": ""
                     },
@@ -95,6 +94,87 @@
                         "scope": "window",
                         "markdownDescription": "Automatically reveal the current file in the Keil project tree when possible.",
                         "default": false
+                    },
+                    "KeilAssistant.LanguageService": {
+                        "type": "string",
+                        "scope": "window",
+                        "enum": [
+                            "cpptools",
+                            "clangd",
+                            "none"
+                        ],
+                        "default": "cpptools",
+                        "markdownDescription": "Language service for this workspace. clangd manages a compilation database and workspace clangd arguments, and disables Microsoft C/C++ IntelliSense. Switching away restores settings it still owns."
+                    },
+                    "KeilAssistant.Clangd.CompilerPath": {
+                        "type": "string",
+                        "scope": "resource",
+                        "default": "",
+                        "markdownDescription": "Optional compiler driver path for clangd. AC6 auto-detects ARMCLANG/bin/armclang.exe from MDK.Uv4Path. AC5 uses a Clang virtual driver."
+                    },
+                    "KeilAssistant.Clangd.PackRoot": {
+                        "type": "string",
+                        "scope": "resource",
+                        "default": "",
+                        "description": "Optional CMSIS Pack root. Otherwise searches CMSIS_PACK_ROOT, LocalAppData/Arm/Packs and Keil ARM/PACK for the exact PackID."
+                    },
+                    "KeilAssistant.Clangd.SystemIncludes": {
+                        "type": "array",
+                        "scope": "resource",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "markdownDescription": "Additional toolchain, CMSIS, Pack and RTE include directories, relative to the .uvprojx directory or absolute."
+                    },
+                    "KeilAssistant.Clangd.ExtraArgs": {
+                        "type": "array",
+                        "scope": "resource",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "markdownDescription": "Verified Clang arguments appended after generated options, e.g. -mfpu=fpv4-sp-d16 and -mfloat-abi=hard. One argument per array item; do not include shell quoting."
+                    },
+                    "KeilAssistant.Clangd.CStandard": {
+                        "type": "string",
+                        "scope": "resource",
+                        "enum": [
+                            "auto",
+                            "c90",
+                            "gnu90",
+                            "c99",
+                            "gnu99",
+                            "c11",
+                            "gnu11",
+                            "c17",
+                            "gnu17",
+                            "c23",
+                            "gnu23"
+                        ],
+                        "default": "auto",
+                        "description": "C language standard override."
+                    },
+                    "KeilAssistant.Clangd.CppStandard": {
+                        "type": "string",
+                        "scope": "resource",
+                        "enum": [
+                            "auto",
+                            "c++03",
+                            "gnu++03",
+                            "c++11",
+                            "gnu++11",
+                            "c++14",
+                            "gnu++14",
+                            "c++17",
+                            "gnu++17",
+                            "c++20",
+                            "gnu++20",
+                            "c++23",
+                            "gnu++23"
+                        ],
+                        "default": "auto",
+                        "description": "C++ language standard override."
                     }
                 }
             }
@@ -179,6 +259,14 @@
                     "light": "./res/icons/ActiveApplication_16x.svg",
                     "dark": "./res/icons/ActiveApplication_16x.svg"
                 }
+            },
+            {
+                "command": "keilClangd.selectBackend",
+                "title": "Keil clangd: Select Language Service"
+            },
+            {
+                "command": "keilClangd.showStatus",
+                "title": "Keil clangd: Show Configuration Status"
             }
         ],
         "menus": {
@@ -271,7 +359,13 @@
                 "modelDescription": "Build or rebuild a Keil project target. Returns compilation results including errors and warnings with file paths, line numbers, and error codes. Use this tool when: 1) User asks to compile/build/rebuild a Keil project or embedded firmware, 2) User mentions 'build the project' or 'compile the code', 3) User wants to check for compilation errors, 4) User asks to verify if the code compiles successfully.",
                 "userDescription": "Build or rebuild a Keil uVision project target",
                 "icon": "$(tools)",
-                "tags": ["build", "compile", "keil", "embedded", "firmware"],
+                "tags": [
+                    "build",
+                    "compile",
+                    "keil",
+                    "embedded",
+                    "firmware"
+                ],
                 "toolReferenceName": "buildKeilProject",
                 "canBeReferencedInPrompt": true,
                 "inputSchema": {
@@ -295,7 +389,13 @@
                 "modelDescription": "Get detailed information about the current Keil project including project name, type (C51/C251/ARM), active target, all available targets, and source file list. Use this tool when: 1) User asks 'what is the current project', 'show project info', or 'list project files', 2) User wants to know available build targets, 3) User asks about project configuration or structure, 4) You need to understand the project context before building or making changes, 5) User asks about the project type (C51/ARM/C251).",
                 "userDescription": "Get information about the current Keil uVision project",
                 "icon": "$(info)",
-                "tags": ["info", "project", "keil", "structure", "configuration"],
+                "tags": [
+                    "info",
+                    "project",
+                    "keil",
+                    "structure",
+                    "configuration"
+                ],
                 "toolReferenceName": "getKeilProjectInfo",
                 "canBeReferencedInPrompt": true,
                 "inputSchema": {
@@ -402,7 +502,8 @@
         "webpack:watch": "npx webpack --mode development --watch",
         "lint": "npx eslint src --ext .ts",
         "pretest": "npm run lint && npm run compile",
-        "test": "node ./scripts/run-mocha.js"
+        "test": "node ./scripts/run-mocha.js",
+        "package": "vsce package --no-dependencies"
     },
     "devDependencies": {
         "@types/glob": "^7.1.1",
@@ -412,16 +513,23 @@
         "@types/xml2js": "^0.4.14",
         "@typescript-eslint/eslint-plugin": "^5.54.0",
         "@typescript-eslint/parser": "^5.54.0",
+        "@vscode/vsce": "^3.6.0",
         "eslint": "^8.35.0",
         "glob": "^7.1.5",
-        "mocha": "^10.2.0",
+        "mocha": "^12.0.0",
         "ts-loader": "^9.4.2",
         "typescript": "^4.9.5",
-        "vscode-test": "^1.6.1",
         "webpack": "^5.75.0",
         "webpack-cli": "^5.0.1"
     },
     "dependencies": {
         "xml2js": "^0.6.2"
+    },
+    "license": "MIT AND Apache-2.0",
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": false,
+            "description": "Keil build commands and workspace configuration require trust."
+        }
     }
 }

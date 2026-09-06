@@ -17,25 +17,25 @@ function readReadmeEn(): string {
 }
 
 describe('marketplace metadata', () => {
-    it('keeps the extension id stable while making the fork identity explicit', () => {
+    it('uses a separate personal fork identity and repository', () => {
         const manifest = readPackageJson();
 
-        assert.equal(manifest.name, 'keil-assistant-new');
-        assert.equal(manifest.displayName, 'Keil Assistant Community Fork');
-        assert.match(manifest.description, /community-maintained fork/i);
-        assert.equal(manifest.homepage, 'https://github.com/ruiwarn/keil-assistant');
-        assert.equal(manifest.repository.url, 'https://github.com/ruiwarn/keil-assistant');
-        assert.equal(manifest.bugs.url, 'https://github.com/ruiwarn/keil-assistant/issues');
-        assert.equal(manifest.contributes.configuration[0].title, 'Keil Assistant Community Fork');
+        assert.equal(manifest.name, 'keil-assistant-clangd');
+        assert.equal(manifest.displayName, 'Keil Assistant clangd (Personal)');
+        assert.match(manifest.description, /unofficial personal-use modifications/i);
+        assert.equal(manifest.homepage, 'https://github.com/AKCX2002/keil-assistant-clangd');
+        assert.equal(manifest.repository.url, 'https://github.com/AKCX2002/keil-assistant-clangd');
+        assert.equal(manifest.bugs.url, 'https://github.com/AKCX2002/keil-assistant-clangd/issues');
+        assert.equal(manifest.contributes.configuration[0].title, 'Keil Assistant clangd (Personal)');
     });
 
     it('makes the independent continuation and differentiators obvious at the top of the README', () => {
         const readme = readReadme();
 
-        assert.match(readme, /^# Keil Assistant Community Fork/m);
-        assert.match(readme, /community-maintained continuation of the original Keil Assistant/i);
-        assert.match(readme, /## What Is Different In This Edition\?/i);
-        assert.match(readme, /## Project Origin/i);
+        assert.match(readme, /^# Keil Assistant clangd \(Personal\)/m);
+        assert.match(readme, /自用修改/);
+        assert.match(readme, /## 使用/);
+        assert.match(readme, /## 来源与许可/);
     });
 
     it('does not reference marketplace-risk screenshots in the public readmes', () => {
