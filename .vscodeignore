@@ -18,9 +18,15 @@ docs/upstream/**
 dist/src/test/**
 dist/lib/**
 dist/src/**
+
+dist/artifacts/**
 lib/**
 scripts/**
 docs/**
+!docs/README.md
+!docs/AC5_DIAGNOSTICS.md
+!docs/KNOWN_LIMITATIONS.md
+!docs/UPSTREAM_COMPARISON.md
 memory-bank/**
 .claude/**
 .roo/**

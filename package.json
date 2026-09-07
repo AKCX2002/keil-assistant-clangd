@@ -2,7 +2,7 @@
     "name": "keil-assistant-clangd",
     "displayName": "Keil Assistant clangd (Personal)",
     "description": "Unofficial personal-use modifications of Keil Assistant with an optional clangd backend",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "publisher": "AKCX2002",
     "author": {
         "name": "AKCX2002"

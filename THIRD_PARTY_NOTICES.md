@@ -12,7 +12,8 @@ identify compatible tools and do not imply a trademark license or endorsement.
 - Repository license: MIT; the original `LICENSE` is retained unchanged.
 - Original notice: Copyright (c) 2020 cl.
 - Local changes: separate extension identity, optional clangd backend,
-  compilation database management, tests and personal-use documentation.
+  compilation database management, editor-only AC5 parameter/VFS adaptation,
+  tests, build scope fixes and personal-use documentation.
 - Original README and changelog files are retained under `docs/upstream/` for provenance;
   their marketplace and maintenance statements describe upstream, not this fork.
 
