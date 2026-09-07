@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CompileCommand, CompilationResult, createCompileCommands, detectArmCompiler, mergeCompilationDatabases } from './compileCommands';
 import { armVersionMacros, findDevicePack } from './armToolchain';
+import { prepareAc5Overlay } from './ac5Overlay';
 
 export type LanguageService = 'cpptools' | 'clangd' | 'none';
 export function languageService(): LanguageService {
@@ -93,15 +94,23 @@ export class ClangdBackend implements vscode.Disposable {
     private timer?: NodeJS.Timeout;
     private chain: Promise<void> = Promise.resolve();
     private disposed = false;
+    private getProjects?: () => ClangdProject[];
 
     constructor(private readonly context: vscode.ExtensionContext) {
         this.status.command = 'keilClangd.showStatus';
         this.status.text = '$(symbol-method) Keil clangd';
         context.subscriptions.push(vscode.commands.registerCommand('keilClangd.showStatus', () => this.output.show()));
+        const watcher = vscode.workspace.createFileSystemWatcher('**/*.{c,h,cc,cpp,cxx,hpp,hxx}');
+        const refreshOverlay = () => {
+            if (languageService() === 'clangd' && this.getProjects) { this.schedule(this.getProjects); }
+        };
+        context.subscriptions.push(watcher, watcher.onDidChange(refreshOverlay),
+            watcher.onDidCreate(refreshOverlay), watcher.onDidDelete(refreshOverlay));
     }
 
     schedule(getProjects: () => ClangdProject[]): void {
         if (this.disposed) { return; }
+        this.getProjects = getProjects;
         if (this.timer) { clearTimeout(this.timer); }
         this.timer = setTimeout(() => {
             this.chain = this.chain.then(() => this.sync(getProjects())).catch(error => {
@@ -166,10 +175,18 @@ export class ClangdBackend implements vscode.Disposable {
         if (!vscode.workspace.isTrusted) { throw new Error('Workspace trust is required.'); }
         if (!this.context.storageUri) { throw new Error('Open a workspace folder before enabling clangd.'); }
         this.output.clear();
+        const directory = path.join(this.context.storageUri.fsPath, 'clangd');
         const databases: CompileCommand[][] = [];
         let warningCount = 0;
         for (const project of projects) {
             const result = await generateProjectDatabase(project);
+            if (result.toolchain === 'armcc') {
+                const adapted = prepareAc5Overlay(result.entries, path.join(directory, 'ac5'));
+                if (adapted.length) {
+                    result.warnings.push('AC5 packed declarations adapted in saved-file VFS snapshots (original files and byte offsets retained): ' + adapted.join(', '));
+                    result.warnings.push('Packed snapshots cover literal includes. An open editor buffer takes precedence over VFS; native __packed syntax in that buffer can still be diagnosed.');
+                }
+            }
             this.output.appendLine(`${project.projectFile} :: ${project.targetName} [${result.toolchain}] (${result.entries.length} sources)`);
             for (const warning of result.warnings) { this.output.appendLine('  WARNING: ' + warning); warningCount++; }
             databases.push(result.entries);
@@ -178,7 +195,6 @@ export class ClangdBackend implements vscode.Disposable {
         if (databases.reduce((sum, database) => sum + database.length, 0) > entries.length) {
             this.output.appendLine('Shared sources: active project takes precedence.');
         }
-        const directory = path.join(this.context.storageUri.fsPath, 'clangd');
         const file = path.join(directory, 'compile_commands.json');
         const content = JSON.stringify(entries, null, 2) + '\n';
         fs.mkdirSync(directory, { recursive: true });

@@ -13,7 +13,7 @@ const mocha = new Mocha({
     grep: getArgValue('--grep')
 });
 
-const files = glob.sync('dist/**/*.test.js').sort();
+const files = glob.sync('dist/src/test/**/*.test.js').sort();
 files.forEach(file => mocha.addFile(file));
 
 mocha.run(failures => {

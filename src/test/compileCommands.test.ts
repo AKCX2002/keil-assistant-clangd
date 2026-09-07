@@ -107,9 +107,15 @@ describe('clangd compilation database', () => {
 
     it('reports AC5 approximation without deleting packed or intrinsic semantics', () => {
         const dom = target(); dom.uAC6 = '0'; dom.pCCUsed = '5060960::V5.06::ARMCC';
+        dom.TargetOption.TargetArmAds.Cads.VariousControls.Define = '__CC_ARM,BOARD=1';
         const result = createCompileCommands(dom, options);
         assert.equal(result.toolchain, 'armcc');
         assert.ok(result.warnings.some(warning => warning.includes('AC5 approximation')));
         assert.ok(!result.entries[0].arguments.some(arg => arg.startsWith('-D__packed') || arg.startsWith('-D__builtin')));
+        const args = result.entries[0].arguments;
+        assert.ok(args.indexOf('-U__CC_ARM') > args.indexOf('-D__CC_ARM'));
+        assert.ok(args.includes('-fdeclspec'));
+        assert.equal(args[args.indexOf('-include') + 1], 'arm_acle.h');
+        assert.ok(!createCompileCommands(target(), options).entries[0].arguments.includes('-U__CC_ARM'));
     });
 });

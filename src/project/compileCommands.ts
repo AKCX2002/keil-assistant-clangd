@@ -117,8 +117,10 @@ export function createCompileCommands(target: any, options: CompileOptions): Com
     if (toolchain === 'armcc') {
         warnings.add('AC5 approximation: legacy embedded assembly, pragmas and compiler intrinsics are not fully supported.');
         // Preserve useful declaration semantics. Do not erase __packed or built-in functions.
-        base.push('-D__CC_ARM=1', '-D__align(x)=__attribute__((aligned(x)))',
+        base.push('-fdeclspec', '-include', 'arm_acle.h', '-D__ARM_NO_DEPRECATED_FUNCTIONS=1',
+            '-D__align(x)=__attribute__((aligned(x)))',
             '-D__weak=__attribute__((weak))', '-D__forceinline=inline __attribute__((always_inline))');
+        warnings.add('AC5 deprecated register-return runtime functions are unavailable to clangd (__ARM_NO_DEPRECATED_FUNCTIONS=1); calls remain unsupported.');
     }
     const compilerVersion = /^(\d+)::/.exec(String(target.pCCUsed || ''))?.[1];
     if (compilerVersion) {
@@ -211,6 +213,12 @@ export function createCompileCommands(target: any, options: CompileOptions): Com
                         }
                     }
                 }
+            }
+            if (toolchain === 'armcc') {
+                // Clang cannot parse the ARMCC embedded-assembler CMSIS branch.
+                // Apply after project defines, including explicit __CC_ARM entries.
+                args.push('-U__CC_ARM');
+                warnings.add('AC5 editor parsing uses the GCC/Clang CMSIS branch (__CC_ARM undefined); Keil build commands are unchanged.');
             }
             args.push(...options.extraArgs || []);
             entries.push({ directory: path.dirname(options.projectFile), file: source,
