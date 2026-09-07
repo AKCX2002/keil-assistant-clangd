@@ -4,7 +4,7 @@ Unofficial personal-use modifications by AKCX2002, based on ruiwarn/keil-assista
 (82e1516, MIT) and selected compilation-database logic from huiyi-li/keil2clangd
 (5281918, Apache-2.0). Not endorsed by Arm, Keil, LLVM, Microsoft or upstream authors.
 
-**0.1.3 is a preview. Neither clangd nor Microsoft C/C++ provides native ARMCC5
+**0.1.4 is a preview. Neither clangd nor Microsoft C/C++ provides native ARMCC5
 equivalence. Keil build results remain authoritative.** Firmware source/project
 files and UV4 build/download commands are unchanged by these editor adaptations.
 
@@ -13,12 +13,14 @@ Disable other Keil Assistant editions in the same VS Code window. Configure the
 actual KeilAssistant.MDK.Uv4Path and a working clangd.path, open a trusted workspace,
 then run **Keil clangd: Select Language Service**. The default backend is cpptools.
 
-clangd mode generates a database in extension workspace storage, updates it when
-projects/targets change, sets workspace clangd arguments and disables C/C++
+clangd mode generates `compile_commands.json` beside the active `.uvproj/.uvprojx`,
+updates it when projects/targets change, sets workspace clangd arguments and disables C/C++
 IntelliSense. Switching away restores settings still owned by this extension.
-Switch away before uninstalling. Existing user .clangd and compilation databases
-are preserved; they may override generated settings. Shared sources use the active
-project's command. Conflicting compile-commands-dir settings are reported.
+Switch away before uninstalling. Existing user `.clangd` files are preserved; the
+compilation database beside the active project is generated and updated by this
+extension. AC5 adaptation snapshots stay in its `.keil-assistant-clangd` subdirectory.
+Shared sources use the active project's command. Conflicting compile-commands-dir
+settings are reported.
 
 AC6 is the primary target. AC5 support is an approximation: legacy assembly and
 proprietary language extensions are not fully supported. C51/C251 need cpptools.
@@ -57,7 +59,7 @@ Packed VFS rewriting preserves supported record definitions, not all AC5 semanti
 The local clangd 23.1.0 check still fails a refactoring self-test on macro expressions in
 two files, despite zero source-error diagnostics across 69 checked translation units.
 Eleven existing lint warnings remain. Hardware and exhaustive editor/AC5 compatibility
-have not been validated. The 0.1.3 VSIX was installed in the actual `keil` Profile, but
+have not been validated. The 0.1.4 VSIX was installed in the actual `keil` Profile, but
 the original window has not yet been reloaded and refreshed, so disappearance of the
 reported Problems diagnostics is not recorded as verified.
 See the [Chinese limitation register](docs/KNOWN_LIMITATIONS.md)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4 (preview)
+
+- Generate `compile_commands.json` beside the active Keil project instead of in
+  VS Code workspace storage; keep AC5 snapshots in `.keil-assistant-clangd`.
+- Migrate the extension's legacy workspace-storage argument automatically and
+  shadow inherited compile-database arguments without discarding other options.
+- Continue rejecting a different compile-database path explicitly owned by the
+  current workspace, and ignore generated snapshots in the source watcher.
+
 ## 0.1.3 (preview)
 
 - Keep AC5 `__packed` declarations parseable when an open editor buffer overrides the

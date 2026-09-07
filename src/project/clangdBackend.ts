@@ -6,6 +6,7 @@ import * as path from 'path';
 import { CompileCommand, CompilationResult, createCompileCommands, detectArmCompiler, mergeCompilationDatabases } from './compileCommands';
 import { armVersionMacros, findDevicePack } from './armToolchain';
 import { prepareAc5Overlay } from './ac5Overlay';
+import { planClangdArguments, previousClangdArguments } from './clangdSettings';
 
 export type LanguageService = 'cpptools' | 'clangd' | 'none';
 export function languageService(): LanguageService {
@@ -85,8 +86,8 @@ interface SavedSettings {
     ownedEngine?: boolean;
 }
 
-// All writes are confined to extension storage and explicit workspace settings.
-// No user .clangd or compile_commands.json is overwritten.
+// Generated clangd files live beside the active Keil project; workspace settings
+// only point clangd at that project directory.
 export class ClangdBackend implements vscode.Disposable {
     private readonly output = vscode.window.createOutputChannel('Keil Assistant clangd');
     private readonly status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
@@ -101,7 +102,8 @@ export class ClangdBackend implements vscode.Disposable {
         this.status.text = '$(symbol-method) Keil clangd';
         context.subscriptions.push(vscode.commands.registerCommand('keilClangd.showStatus', () => this.output.show()));
         const watcher = vscode.workspace.createFileSystemWatcher('**/*.{c,h,cc,cpp,cxx,hpp,hxx}');
-        const refreshOverlay = () => {
+        const refreshOverlay = (uri: vscode.Uri) => {
+            if (uri.fsPath.split(path.sep).includes('.keil-assistant-clangd')) { return; }
             if (languageService() === 'clangd' && this.getProjects) { this.schedule(this.getProjects); }
         };
         context.subscriptions.push(watcher, watcher.onDidChange(refreshOverlay),
@@ -142,23 +144,24 @@ export class ClangdBackend implements vscode.Disposable {
         const current = config.get<string[]>('arguments', []);
         const flag = '--compile-commands-dir=' + directory;
         const saved = this.context.workspaceState.get<SavedSettings>(this.settingsKey);
-        if (current.some(arg => /^--?compile-commands-dir(?:=|$)/.test(arg) && arg !== flag)) {
-            throw new Error('Existing clangd compile-commands-dir conflicts. Remove it explicitly before enabling this backend.');
-        }
-        if (saved && JSON.stringify(current) !== JSON.stringify(saved.ownedArgs)) {
-            throw new Error('clangd.arguments changed externally. Switch to cpptools/none, then enable clangd again to adopt the new settings.');
-        }
-        const ownedArgs = current.includes(flag) ? current : [...current, flag];
+        const workspaceValue = config.inspect<string[]>('arguments')?.workspaceValue;
+        const ownedArgs = planClangdArguments(current, workspaceValue, flag, saved);
         if (!saved) {
             await this.context.workspaceState.update(this.settingsKey, {
-                previousArgs: config.inspect<string[]>('arguments')?.workspaceValue,
+                previousArgs: previousClangdArguments(workspaceValue),
                 previousEngine: vscode.workspace.getConfiguration('C_Cpp').inspect<string>('intelliSenseEngine')?.workspaceValue,
                 ownedArgs, ownedEngine: !!vscode.extensions.getExtension('ms-vscode.cpptools')
             } as SavedSettings);
+        } else if (JSON.stringify(ownedArgs) !== JSON.stringify(saved.ownedArgs)) {
+            await this.context.workspaceState.update(this.settingsKey, { ...saved, ownedArgs });
         }
         if (JSON.stringify(current) !== JSON.stringify(ownedArgs)) {
             await config.update('arguments', ownedArgs, vscode.ConfigurationTarget.Workspace);
         }
+        await this.disableCppTools();
+    }
+
+    private async disableCppTools(): Promise<void> {
         const cpp = vscode.workspace.getConfiguration('C_Cpp');
         if (vscode.extensions.getExtension('ms-vscode.cpptools') && cpp.get('intelliSenseEngine') !== 'disabled') {
             await cpp.update('intelliSenseEngine', 'disabled', vscode.ConfigurationTarget.Workspace);
@@ -173,15 +176,17 @@ export class ClangdBackend implements vscode.Disposable {
             return;
         }
         if (!vscode.workspace.isTrusted) { throw new Error('Workspace trust is required.'); }
-        if (!this.context.storageUri) { throw new Error('Open a workspace folder before enabling clangd.'); }
         this.output.clear();
-        const directory = path.join(this.context.storageUri.fsPath, 'clangd');
+        // ProjectExplorer orders the active project last, so the merged database
+        // follows the active .uvproj/.uvprojx when the user switches projects.
+        const directory = path.dirname(projects[projects.length - 1].projectFile);
+        const overlayDirectory = path.join(directory, '.keil-assistant-clangd', 'ac5');
         const databases: CompileCommand[][] = [];
         let warningCount = 0;
         for (const project of projects) {
             const result = await generateProjectDatabase(project);
             if (result.toolchain === 'armcc') {
-                const adapted = prepareAc5Overlay(result.entries, path.join(directory, 'ac5'));
+                const adapted = prepareAc5Overlay(result.entries, overlayDirectory);
                 if (adapted.length) {
                     result.warnings.push('AC5 packed declarations adapted in saved-file VFS snapshots (original files and byte offsets retained): ' + adapted.join(', '));
                     result.warnings.push('Packed snapshots cover literal includes. Open editor buffers take precedence over VFS and use an editor-only empty __packed fallback: declarations remain parseable, but packed layout is not represented until clangd reads the saved-file snapshot.');

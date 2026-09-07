@@ -4,7 +4,7 @@
 非官方项目，不代表 Arm、Keil、LLVM、Microsoft 或上游作者；不承诺持续维护或商业支持。
 扩展标识为 **AKCX2002.keil-assistant-clangd**，不是上游 Marketplace 版本。
 
-**当前版本 0.1.3 仍为预览版：clangd 和 Microsoft C/C++ 都不能替代 ARMCC5 编译验收。**
+**当前版本 0.1.4 仍为预览版：clangd 和 Microsoft C/C++ 都不能替代 ARMCC5 编译验收。**
 本次修复针对编辑器解析错误，不修改固件源码、`.uvprojx` 或 UV4 构建/下载命令。
 详细见 [本次故障原因与修复总结](docs/AC5_DIAGNOSTICS.md)、[已知缺陷与兼容处理](docs/KNOWN_LIMITATIONS.md)。
 
@@ -17,15 +17,17 @@
 5. 执行“Keil clangd: Select Language Service”，选择 clangd。默认仍为 cpptools。
 6. 点击状态栏 Keil clangd 查看当前工程、Target、数据库路径和适配提示。
 
-clangd 模式在扩展的工作区存储目录生成 compile_commands.json；打开工程、刷新、切换
-Target 或修改工程后自动更新。数据库有变化时刷新官方 clangd 服务。
-同一个文件属于多个工程时，活动工程的配置优先。
+clangd 模式在当前活动 `.uvproj/.uvprojx` 所在目录生成 `compile_commands.json`；打开工程、
+刷新、切换 Target 或修改工程后自动更新。数据库有变化时刷新官方 clangd 服务。
+同时打开多个工程时，数据库随活动工程目录移动；同一个文件属于多个工程时，活动工程的
+配置优先。AC5 适配快照保存在该目录下的 `.keil-assistant-clangd` 子目录。
 
 选择 clangd 会在当前工作区添加 clangd.arguments 的数据库路径，并关闭 Microsoft
 C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/none 或关闭所有 Keil
 工程时，恢复仍由本插件管理的设置；用户后来自行改动的配置不会被覆盖。
-卸载前请先切换后端以恢复设置。用户的 .clangd、compile_commands.json 保持原样；
-已有 .clangd 或用户级 clangd 配置仍可能覆盖生成参数。
+卸载前请先切换后端以恢复设置。用户的 `.clangd` 保持原样；活动工程目录中的
+`compile_commands.json` 由插件生成和更新。已有 `.clangd` 或用户级 clangd 配置仍可能
+覆盖生成参数。
 
 设置项：
 
@@ -111,7 +113,7 @@ packed VFS 快照后的二次错误。
 以上处理均不进入 Keil 正式构建。涉及布局、寄存器、汇编和编译器分支时，按原源码和
 实际 UV4/ARMCC5 结果判断，不直接根据编辑器的自动修复建议改动固件。
 
-0.1.3 VSIX 已安装到实际 `keil` Profile，但原 VS Code 窗口尚未重载并刷新工程；
+0.1.4 VSIX 已安装到实际 `keil` Profile，但原 VS Code 窗口尚未重载并刷新工程；
 因此尚未把截图中的 Problems 面板消失记为通过。定向复现、单元测试、打包和安装
 分别有证据，但都不替代这项交互验收。具体结果与最小复验步骤见故障分析文档。
 
@@ -129,7 +131,7 @@ packed VFS 快照后的二次错误。
 ## 开发
 
 使用 Node.js 22.12 或更新版本：npm ci → npm test → npm run package。
-产出 keil-assistant-clangd-0.1.3.vsix。测试覆盖编译参数、文件排除、目标合并和上游回归。
+产出 keil-assistant-clangd-0.1.4.vsix。测试覆盖编译参数、文件排除、目标合并和上游回归。
 编译输入限定为 src/lib，测试只收集 dist/src/test；artifacts 下的参考仓库不参与发布构建。
 真实编译器与编辑器验证范围以对应 Release 说明为准，不将单元测试视为完整固件验收。
 
