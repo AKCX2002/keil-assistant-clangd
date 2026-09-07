@@ -105,7 +105,10 @@ export function prepareAc5Overlay(entries: CompileCommand[], directory: string):
         'case-sensitive': process.platform !== 'win32', 'use-external-names': false,
         roots: Array.from(roots.values()).sort((a, b) => a.name.localeCompare(b.name)) }));
     for (const entry of entries) {
-        entry.arguments.splice(1, 0, '-D__KAP=__attribute__((packed))', '-ivfsoverlay', overlay);
+        // clangd drafts (open editor buffers) take precedence over a VFS file.
+        // Keep those drafts parseable; saved-file reads still use the transformed
+        // snapshot below and therefore retain the supported packed layout.
+        entry.arguments.splice(1, 0, '-D__packed=', '-D__KAP=__attribute__((packed))', '-ivfsoverlay', overlay);
     }
     return Array.from(roots.values()).map(root => root.name);
 }

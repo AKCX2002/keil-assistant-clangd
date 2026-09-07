@@ -73,6 +73,8 @@ describe('AC5 editor-only packed overlay', () => {
             const entry = () => ({ directory: dir, file: source, arguments: ['clang', '-I', dir, '-c', source] });
             const first = entry();
             assert.deepEqual(prepareAc5Overlay([first], path.join(dir, 'storage')), [nested]);
+            assert.ok(first.arguments.includes('-D__packed='));
+            assert.ok(first.arguments.includes('-D__KAP=__attribute__((packed))'));
             const overlay = first.arguments[first.arguments.indexOf('-ivfsoverlay') + 1];
             const vfs = JSON.parse(fs.readFileSync(overlay, 'utf8'));
             assert.equal(vfs['use-external-names'], false);

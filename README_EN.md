@@ -4,7 +4,7 @@ Unofficial personal-use modifications by AKCX2002, based on ruiwarn/keil-assista
 (82e1516, MIT) and selected compilation-database logic from huiyi-li/keil2clangd
 (5281918, Apache-2.0). Not endorsed by Arm, Keil, LLVM, Microsoft or upstream authors.
 
-**0.1.2 is a preview. Neither clangd nor Microsoft C/C++ provides native ARMCC5
+**0.1.3 is a preview. Neither clangd nor Microsoft C/C++ provides native ARMCC5
 equivalence. Keil build results remain authoritative.** Firmware source/project
 files and UV4 build/download commands are unchanged by these editor adaptations.
 
@@ -30,8 +30,9 @@ For AC5 editor parsing, CMSIS uses its existing GCC/Clang branch, Clang ACLE sup
 intrinsics, and the Arm library's deprecated register-return APIs are excluded.
 Packed struct/union declarations reached through literal includes are adapted in
 extension-storage VFS snapshots, preserving layout, original paths and byte offsets.
-Snapshots refresh on saved C/H changes. Open editor buffers override VFS, so a packed
-header opened directly may still report AC5 syntax errors. Macro-generated includes
+Snapshots refresh on saved C/H changes. Open editor buffers override VFS and use an
+editor-only empty `__packed` fallback: declarations and completion remain available,
+but packed layout is not represented in that draft. Macro-generated includes
 and other proprietary syntax are not covered. Firmware files, Keil projects and
 build/download commands are unchanged. The configuration status reports these limits.
 

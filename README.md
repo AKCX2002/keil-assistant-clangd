@@ -4,7 +4,7 @@
 非官方项目，不代表 Arm、Keil、LLVM、Microsoft 或上游作者；不承诺持续维护或商业支持。
 扩展标识为 **AKCX2002.keil-assistant-clangd**，不是上游 Marketplace 版本。
 
-**当前版本 0.1.2 仍为预览版：clangd 和 Microsoft C/C++ 都不能替代 ARMCC5 编译验收。**
+**当前版本 0.1.3 仍为预览版：clangd 和 Microsoft C/C++ 都不能替代 ARMCC5 编译验收。**
 本次修复针对编辑器解析错误，不修改固件源码、`.uvprojx` 或 UV4 构建/下载命令。
 详细见 [本次故障原因与修复总结](docs/AC5_DIAGNOSTICS.md)、[已知缺陷与兼容处理](docs/KNOWN_LIMITATIONS.md)。
 
@@ -56,7 +56,8 @@ C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/n
   对可沿字面量 include 找到的 `__packed struct/union`，在扩展存储区生成 VFS 副本，
   调整属性位置并保持紧凑布局、源文件路径及字节偏移；保存 C/H 文件后自动刷新。
   原文件、Keil 工程和构建/下载命令不变。此映射针对已保存的磁盘内容：编辑器打开的
-  原始缓冲区优先于 VFS，直接打开含 `__packed` 的头文件时仍可能报错；宏生成的 include
+  原始缓冲区优先于 VFS；直接打开含 `__packed` 的文件时使用仅供编辑器解析的空宏，
+  声明和补全可用，但该打开缓冲区不表示 packed 布局；宏生成的 include
   和其他 AC5 专有语法不在此适配范围内。配置状态会列出实际映射文件及限制。
 - C51/C251：继续选择 cpptools；clangd 模式不支持这些工程。
 - 未覆盖的 CPU/FPU 选项和 MiscControls 会出现在配置提示中，需要核验后用 ExtraArgs
@@ -70,7 +71,7 @@ C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/n
 | 问题 | 当前状态与影响 |
 | --- | --- |
 | ARMCC5 专有汇编、寄存器变量、pragma、调用约定 | 没有原生兼容；可能误报或漏报。选择 armcc.exe 不会把 clangd 的解析器换成 ARMCC5 |
-| 直接打开含 `__packed` 的源/头文件 | 编辑器缓冲区优先于磁盘 VFS 副本，仍可能报错；保存并刷新不保证消除直接打开文件的报错 |
+| 直接打开含 `__packed` 的源/头文件 | 编辑器缓冲区优先于磁盘 VFS 副本；空宏 fallback 保持声明/补全可用，但打开缓冲区不表示 packed 布局 |
 | packed 指针、已有类型限定、宏展开后产生的声明 | 只转换明确的 struct/union 定义；其余形式保留原样，不能声称完整 ABI 等价 |
 | 宏生成的 include、include_next、特殊搜索参数 | VFS 扫描不是完整预处理器；不能保证找到所有实际依赖。非 UTF-8 编码的非 ASCII 头文件名未保证支持 |
 | 工作区外头文件发生变化 | 可能需要手动执行 Refresh Keil Project；现有文件监听不覆盖所有外部依赖 |
@@ -109,7 +110,7 @@ C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/n
 ## 开发
 
 使用 Node.js 22.12 或更新版本：npm ci → npm test → npm run package。
-产出 keil-assistant-clangd-0.1.2.vsix。测试覆盖编译参数、文件排除、目标合并和上游回归。
+产出 keil-assistant-clangd-0.1.3.vsix。测试覆盖编译参数、文件排除、目标合并和上游回归。
 编译输入限定为 src/lib，测试只收集 dist/src/test；artifacts 下的参考仓库不参与发布构建。
 真实编译器与编辑器验证范围以对应 Release 说明为准，不将单元测试视为完整固件验收。
 

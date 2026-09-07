@@ -1,4 +1,4 @@
-# ARMCC5 工程的 VS Code 报错分析与 0.1.2 修复总结
+# ARMCC5 工程的 VS Code 报错分析与 0.1.3 修复总结
 
 记录日期：2026-09-07。对象是本插件生成的 clangd 配置；参考工程为 STM32F407、
 UV4/ARMCC5 的 HC300 工程，活动 Target 为 LCD7。未将该工程的源码或编译器改为 Clang。
@@ -30,6 +30,9 @@ UV4/ARMCC5 的 HC300 工程，活动 Target 为 LCD7。未将该工程的源码�
    不转换已有类型的 packed 指针限定，不改字符串和注释。
 3. `src/project/clangdBackend.ts`：仅对 AC5 数据库添加 VFS；监听工作区 C/H 文件变化，
    保存后重新生成，有变化时刷新 clangd。输出实际映射文件和限制。
+   打开编辑器缓冲区覆盖 VFS 时，通过仅供编辑器使用的空 `__packed` fallback 保持
+   typedef、声明和补全可解析；该打开缓冲区不表示 packed 布局，布局检查仍以保存后的
+   VFS 快照和 ARMCC5 构建为准。
 4. 发布前修正 VFS 搜索顺序：quoted include 先查当前目录和 `-iquote`，再查 `-I`、
    `-isystem`；angle include 不查 `-iquote`。UTF-8 头文件名可解析，副本不重新编码。
 5. `tsconfig.json`、`scripts/run-mocha.js`、`.vscodeignore`：编译只读取 src/lib，
@@ -74,7 +77,8 @@ clangd --check=<实际源文件绝对路径> --compile-commands-dir=<实际数�
 ## 结论
 
 此次问题来自 ARMCC5 与 Clang 的解析差异及不完整的编辑器配置，而不是已证明的
-电机结构体字段缺失。0.1.2 解决了已复现的源码错误，并补上转换边界和发布范围问题。
+电机结构体字段缺失。0.1.3 进一步处理了打开 packed 文件时的声明连锁错误，并明确
+打开缓冲区的布局降级；保存文件的 VFS 转换仍负责支持范围内的 packed 布局。
 它提供的是受限的编辑器适配；剩余问题及绕过代价见 [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)。
 
 参考：[clangd 编译命令](https://clangd.llvm.org/design/compile-commands)、

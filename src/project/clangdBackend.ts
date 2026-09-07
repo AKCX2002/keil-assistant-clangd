@@ -184,7 +184,7 @@ export class ClangdBackend implements vscode.Disposable {
                 const adapted = prepareAc5Overlay(result.entries, path.join(directory, 'ac5'));
                 if (adapted.length) {
                     result.warnings.push('AC5 packed declarations adapted in saved-file VFS snapshots (original files and byte offsets retained): ' + adapted.join(', '));
-                    result.warnings.push('Packed snapshots cover literal includes. An open editor buffer takes precedence over VFS; native __packed syntax in that buffer can still be diagnosed.');
+                    result.warnings.push('Packed snapshots cover literal includes. Open editor buffers take precedence over VFS and use an editor-only empty __packed fallback: declarations remain parseable, but packed layout is not represented until clangd reads the saved-file snapshot.');
                 }
             }
             this.output.appendLine(`${project.projectFile} :: ${project.targetName} [${result.toolchain}] (${result.entries.length} sources)`);

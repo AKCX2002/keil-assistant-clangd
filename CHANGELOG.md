@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 (preview)
+
+- Keep AC5 `__packed` declarations parseable when an open editor buffer overrides the
+  packed VFS snapshot. Saved-file snapshots still carry the supported packed layout;
+  the open-buffer fallback is explicitly editor-only and does not claim layout fidelity.
+
 ## 0.1.2 (preview)
 
 - Include the AC5 editor adaptation introduced in the local 0.1.1 preview; firmware
