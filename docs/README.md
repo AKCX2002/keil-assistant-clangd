@@ -4,8 +4,8 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [AC5_DIAGNOSTICS.md](AC5_DIAGNOSTICS.md) | 此次 VS Code 报错原因、代码修改、验证证据及总结 |
-| [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) | 尚未解决的缺陷、兼容处理的副作用和使用边界 |
+| [AC5_DIAGNOSTICS.md](AC5_DIAGNOSTICS.md) | `ServoProtocol.h` / `AC_SERVER_M` 报错链、根因、0.1.3 修改、验证证据及汇总结论 |
+| [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) | 按 ID 汇总无法解决、有限降级、已有绕过、副作用和待验收项目 |
 | [UPSTREAM_COMPARISON.md](UPSTREAM_COMPARISON.md) | 两个固定版本原版仓库的实现程度及实测对照 |
 | [../README.md](../README.md) | 安装、配置、兼容范围和当前问题摘要 |
 | [../CHANGELOG.md](../CHANGELOG.md) | 版本变更 |

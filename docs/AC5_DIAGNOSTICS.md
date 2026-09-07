@@ -3,12 +3,32 @@
 记录日期：2026-09-07。对象是本插件生成的 clangd 配置；参考工程为 STM32F407、
 UV4/ARMCC5 的 HC300 工程，活动 Target 为 LCD7。未将该工程的源码或编译器改为 Clang。
 
-## 原始现象与原因
+## 两阶段故障现象
 
-在 VS Code 中打开 `USER/Func.c`，clangd 报 included file 中的 `expected identifier`、
+0.1.1/0.1.2 的最初排障从 `USER/Func.c` 开始：clangd 报 included file 中的 `expected identifier`、
 `unknown type name '__packed'`，随后出现结构体没有 running、dir、in、out 等成员的错误。
 沿头文件追踪后，先发生 CMSIS/AC5 声明解析失败，后续成员报错属于解析恢复后的连锁现象，
 不能据此修改固件结构体。
+
+0.1.3 收到的截图是更窄的交互场景：`USER/ServoProtocol.h` 已在编辑器中打开，问题面板
+显示 3 个 `__packed` 错误，以及 `AC_SERVER_S`、`AC_SERVER_M`、`AC_SERVER_ERR` 在表声明和
+访问器声明处产生的 6 个未知类型错误。插件状态同时确认该头文件已生成 packed VFS 快照。
+这两个事实并不矛盾：clangd 的打开文档草稿优先于文件系统和 VFS，因而磁盘快照存在，
+但当前头文件仍按编辑器内存中的原始 ARMCC5 文本解析。
+
+### `AC_SERVER_M` 连锁路径
+
+```text
+打开 ServoProtocol.h
+  -> clangd 使用编辑器草稿，覆盖同路径 VFS 快照
+  -> 原始 typedef __packed struct 不能被 Clang 解析（3 处）
+  -> AC_SERVER_S / AC_SERVER_M / AC_SERVER_ERR 未建立
+  -> 后续 extern 表和访问器声明报告未知类型（6 处）
+```
+
+因此，`AC_SERVER_M` 的定义实际存在于头文件第 36～43 行；第 87 行报错不是缺少 include、
+声明顺序错误或固件类型被删除。直接补写 typedef、移动固件声明或修改 Keil 宏都会把
+编辑器兼容问题错误地转化为固件改动。
 
 | 原因 | 证据与影响 |
 | --- | --- |
@@ -17,6 +37,21 @@ UV4/ARMCC5 的 HC300 工程，活动 Target 为 LCD7。未将该工程的源码�
 | `__packed struct` 的专有限定位置 | Clang 不识别；将 packed 简单变为空宏会丢失布局，放错 attribute 位置也可能被忽略 |
 | ARMCC 库的 `__declspec`、废弃寄存器返回声明 | 需要区分可启用的语法与 Clang 无法表示的专有返回约定 |
 | AC5 直接使用指令内建函数 | Clang 需要自己的 ACLE 声明，例如 `__nop`，不能伪造为固定返回值 |
+
+## 0.1.3 的定向复现
+
+使用截图对应的真实 `compile_commands.json` 和 `ServoProtocol.h` 进行最小实验：
+
+| 输入路径 | 观察结果 | 结论 |
+| --- | --- | --- |
+| `ServoProtocol.c` 经现有 VFS 数据库执行 clangd 离线检查 | 退出码 0 | 保存文件的 packed 快照有效；不能覆盖打开文档草稿场景 |
+| 移除 VFS 映射，按原始头文件模拟打开缓冲区 | 3 个 `unknown type name '__packed'`，随后 6 个 `AC_SERVER_*` 未知类型 | 复现截图中的完整因果链 |
+| 在同一原始头文件命令中增加 `-D__packed=` | 上述 9 个错误全部消失 | 空宏足以恢复声明图，但不证明 packed 布局 |
+| 将 packed 属性放在 `typedef` 与 `struct` 之间 | Clang 报属性被忽略，`sizeof` 仍为非紧凑布局 | 不能用看似更接近源码的 attribute 宏冒充布局修复 |
+| 将属性放到 VFS 中的 `struct/union` 后 | 紧凑布局断言通过 | 保存文件仍应由 VFS 转换负责布局表达 |
+
+该实验一次只改变 VFS/空宏因素。它把“消除声明连锁错误”和“保留 packed 布局”分成两条
+验证路径，避免用红线数量替代语义判断。
 
 ## 修改内容及其责任边界
 
@@ -42,25 +77,27 @@ UV4/ARMCC5 的 HC300 工程，活动 Target 为 LCD7。未将该工程的源码�
 未修改旧 cpptools 的占位宏适配、固件源码、Keil 工程、UV4 构建和下载命令。
 编辑器提供的代码修改建议仍需人工判断；本插件不会将 VFS 内容写回原文件。
 
-## 本次验证与未完成项
+## 验证证据与未完成项
 
-| 项目 | 结果及边界 |
+| 版本/项目 | 结果及边界 |
 | --- | --- |
-| 插件单元测试 | 27 项通过；覆盖配置生成、packed 定义/指针/字符串边界、头文件顺序、中文文件名、原始字节保留和快照刷新 |
-| ESLint / TypeScript | 0 lint 错误、11 个既有 lint 警告；TypeScript 编译通过 |
-| 实际 HC300 数据库 | 69 个启用的 C/C++ 编译单元；未把禁用文件、头文件或静态库当作 C 编译单元 |
-| clangd 23.1.0 离线检查 | 69 个编译单元均无源码错误诊断；完整 `--check` 为 67 个退出 0、2 个失败 |
-| 两个失败的性质 | motor.c / xprintf.c 的宏表达式触发 clangd SwapBinaryOperands 重构自测的替换重叠；保留失败，未屏蔽测试或记为通过 |
-| 布局样例 | ARMCC5 编译原始声明、Clang 检查转换声明，packed struct/union 大小、成员偏移、普通 struct 大小断言通过；不是整个固件 ABI 证明 |
-| VSIX | 发布前执行生产 webpack 和 VSIX 打包；安装包不包含固件、工具链、参考仓库或测试产物 |
-| 新版 VS Code 集成检查 | 已尝试独立配置目录和临时 AC5 样例；在工作区未受信任的门槛处停止，没有完成数据库接入、保存刷新及设置恢复的本轮交互验收 |
-| 原始工程保护 | 本次未写入固件、工程和编辑器配置。发布前复核最初记录的 8 个文件，5 个哈希相同，Func.h/main.c/ServoProtocol.h 已有其他变化；保留现状，不能声称工程全程未变化 |
-| 固件/硬件 | 没有执行本次完整 UV4 固件构建、烧录或硬件动作；不把编辑器检查当作 Keil 或现场验收 |
+| 0.1.3 插件测试 | `npm test`：27 项通过；ESLint 0 error、11 个既有 warning；TypeScript 编译通过 |
+| 0.1.3 定向故障实验 | 原始打开缓冲区路径复现 3 个 `__packed` + 6 个 `AC_SERVER_*` 错误；增加 fallback 后这 9 个错误消失 |
+| 0.1.3 回归保护 | 单元测试确认数据库同时带有 `-D__packed=`、实际 packed 属性宏和 VFS；既有字节偏移、布局、字符串/注释边界、搜索顺序和刷新测试继续通过 |
+| 0.1.3 VSIX | 生产 webpack 与打包通过；生成并安装 `keil-assistant-clangd-0.1.3.vsix` 到 VS Code `keil` Profile |
+| 0.1.3 真实编辑器验收 | 安装成功，但仍需重载原 VS Code 窗口并刷新 Keil 工程；当前没有把截图中的 Problems 面板消失写成已验证 |
+| 0.1.2 实际 HC300 数据库基线 | 69 个启用的 C/C++ 编译单元；未把禁用文件、头文件或静态库当作 C 编译单元 |
+| 0.1.2 clangd 23.1.0 基线 | 69 个编译单元均无源码错误诊断；完整 `--check` 为 67 个退出 0、2 个失败 |
+| 两个保留失败 | motor.c / xprintf.c 的宏表达式触发 clangd SwapBinaryOperands 重构自测替换重叠；未屏蔽或记为通过 |
+| 布局样例基线 | ARMCC5 编译原始声明、Clang 检查转换声明，packed struct/union 大小、成员偏移、普通 struct 大小断言通过；不是整个固件 ABI 证明 |
+| 原始工程保护 | 0.1.3 没有修改固件源码、Keil 工程或编辑器配置；只读取截图对应头文件和生成数据库进行定向实验 |
+| 固件/硬件 | 没有执行本次完整 UV4 固件构建、烧录或硬件动作；编辑器检查不等于 Keil 或现场验收 |
 
 离线检查使用实际生成数据库及本机安装的 clangd；不是全部 VS Code 交互路径的验收。
 尤其不能用 `.c` 文件检查通过推导“直接打开所有 `.h` 文件也无报错”。
-后续最小验收是在用户正常信任的临时样例工作区安装本版，检查成员补全、保存 packed
-头文件后的数据库更新、直接打开头文件的限制，以及切回 none 后参数恢复。
+0.1.3 后续最小验收是重载已安装新版的 `keil` Profile，执行 `Refresh Keil Project`，
+确认新数据库含 `-D__packed=`，再检查 `ServoProtocol.h` 的 9 个连锁错误、成员补全、
+保存刷新，以及切回 none 后的设置恢复。
 
 ## 复查方式
 
@@ -76,10 +113,16 @@ clangd --check=<实际源文件绝对路径> --compile-commands-dir=<实际数�
 
 ## 结论
 
-此次问题来自 ARMCC5 与 Clang 的解析差异及不完整的编辑器配置，而不是已证明的
-电机结构体字段缺失。0.1.3 进一步处理了打开 packed 文件时的声明连锁错误，并明确
-打开缓冲区的布局降级；保存文件的 VFS 转换仍负责支持范围内的 packed 布局。
-它提供的是受限的编辑器适配；剩余问题及绕过代价见 [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)。
+此次报错的直接原因不是 `AC_SERVER_M` 缺失，而是打开文档草稿覆盖 VFS 后，Clang 无法
+解析 ARMCC5 的 `__packed` 关键字位置。3 个 typedef 先失败，6 个使用点才产生连锁错误。
+
+0.1.3 已完成的修复是：保存文件继续通过 VFS 表达支持范围内的 packed 布局；打开文件
+通过空 `__packed` fallback 恢复声明、跳转和补全。两条路径职责不同，不能把打开缓冲区
+当成布局或 ABI 证据，也不能把 clangd 诊断当成 ARMCC5 编译结论。
+
+当前代码、单元测试、打包和安装已完成；原窗口重载后的 Problems 面板复验仍未完成。
+ARMCC5 专有汇编、调用约定、复杂 packed 形式和不完整依赖扫描仍无法由本插件原生解决。
+详细缺陷、绕过方式和代价见 [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)。
 
 参考：[clangd 编译命令](https://clangd.llvm.org/design/compile-commands)、
 [ARM AC5/AC6 迁移说明](https://www.keil.com/appnotes/files/apnt_298.pdf)。

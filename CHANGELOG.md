@@ -5,6 +5,11 @@
 - Keep AC5 `__packed` declarations parseable when an open editor buffer overrides the
   packed VFS snapshot. Saved-file snapshots still carry the supported packed layout;
   the open-buffer fallback is explicitly editor-only and does not claim layout fidelity.
+- Document the `ServoProtocol.h` failure chain: three rejected packed typedefs caused
+  six later `AC_SERVER_S/M/ERR` unknown-type diagnostics; the firmware definitions were
+  present and were not changed.
+- Expand the unresolved-defect and workaround matrix with the scope and semantic cost of
+  each AC5 approximation, including the remaining interactive-validation gap.
 
 ## 0.1.2 (preview)
 

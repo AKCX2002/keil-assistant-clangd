@@ -49,7 +49,9 @@ C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/n
   语言枚举、头文件搜索顺序和 Cortex-M4 FPU 配置已与 uVision 5.43 / AC6 6.24
   生成的 response files 对照；未知语言枚举会要求明确配置，不猜测。
 - AC5：提供有限参数和声明适配；旧式内联/嵌入式汇编、部分专有关键字和 pragma
-  不保证兼容。不会通过删除 packed/attribute 语义或伪造内建函数返回值消除错误。
+  不保证兼容。不会把空 packed/attribute 宏或伪造的内建函数返回值当作完整语义修复；
+  仅在打开缓冲区覆盖 VFS 时使用空 `__packed` fallback，避免声明解析失败，且明确放弃
+  该缓冲区内的 packed 布局表达。
   clangd 命令取消 `__CC_ARM`，让 CMSIS 选择现有 GCC/Clang 实现；使用 Clang ACLE
   头文件声明指令内建函数，启用 `__declspec`，并通过 ARM 标准库原有开关排除
   不支持的废弃寄存器返回函数（`__ARM_NO_DEPRECATED_FUNCTIONS=1`）。这些函数的调用仍不支持。
@@ -66,19 +68,35 @@ C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/n
 - 不支持在同一 VS Code 窗口里同时启用两个 Keil Assistant 扩展，也不替换用户已有
   clangd --compile-commands-dir：检测到冲突会提示处理。
 
+## 本次 `AC_SERVER_M` 报错
+
+参考工程直接打开 `USER/ServoProtocol.h` 后，clangd 先在 3 个
+`typedef __packed struct` 处报 `unknown type name '__packed'`。这 3 个 typedef 因解析失败
+没有建立 `AC_SERVER_S`、`AC_SERVER_M` 和 `AC_SERVER_ERR`，随后 6 个 extern 声明继续报告
+未知类型。因此，截图中的 `AC_SERVER_M` 不是源码缺少类型定义，而是打开缓冲区绕过
+packed VFS 快照后的二次错误。
+
+0.1.3 在已有 VFS 参数旁增加编辑器专用 `-D__packed=`：
+
+- 保存文件经 VFS 快照读取时，支持范围内的 record 定义仍转换为实际 packed 属性；
+- 打开文件由内存缓冲区读取时，空宏只保证 typedef、跳转和补全可用，不表达 packed 布局；
+- 固件源码、`.uvprojx`、UV4 构建和下载命令均不修改。
+
+完整复现、证据和验证边界见 [AC5_DIAGNOSTICS.md](docs/AC5_DIAGNOSTICS.md)。
+
 ## 目前解决不了的问题与已有缺陷
 
-| 问题 | 当前状态与影响 |
-| --- | --- |
-| ARMCC5 专有汇编、寄存器变量、pragma、调用约定 | 没有原生兼容；可能误报或漏报。选择 armcc.exe 不会把 clangd 的解析器换成 ARMCC5 |
-| 直接打开含 `__packed` 的源/头文件 | 编辑器缓冲区优先于磁盘 VFS 副本；空宏 fallback 保持声明/补全可用，但打开缓冲区不表示 packed 布局 |
-| packed 指针、已有类型限定、宏展开后产生的声明 | 只转换明确的 struct/union 定义；其余形式保留原样，不能声称完整 ABI 等价 |
-| 宏生成的 include、include_next、特殊搜索参数 | VFS 扫描不是完整预处理器；不能保证找到所有实际依赖。非 UTF-8 编码的非 ASCII 头文件名未保证支持 |
-| 工作区外头文件发生变化 | 可能需要手动执行 Refresh Keil Project；现有文件监听不覆盖所有外部依赖 |
-| VFS 历史副本 | 内容按哈希存储，当前没有自动清理历史副本；长期编辑会增加工作区存储占用 |
-| 旧 IntelliSense 后端 | 仍保留上游的空宏、常量占位；仅目标级配置，宏拆分和 ARM 数据模型配置也有限制，本次未整改 |
-| clangd 自身重构错误 | 本机 clangd 23.1.0 在 2 个文件的宏表达式上发生 SwapBinaryOperands 自测失败；未修复，不能称完整检查全通过 |
-| 工具链及验证覆盖 | 未映射参数、缺少编译器版本信息仍会提示；保留 11 个既有 lint 警告。未完成所有 AC5 工程、编辑器场景和硬件验证 |
+| 问题 | 状态 | 当前绕过或处理 | 剩余影响 |
+| --- | --- | --- | --- |
+| ARMCC5 专有汇编、寄存器变量、pragma、调用约定 | 无法原生解决 | 让 CMSIS 采用 GCC/Clang 分支；最终以 UV4/ARMCC5 为准 | 可能误报、漏报或观察到不同条件分支；选择 armcc.exe 也不会更换 clangd 解析器 |
+| 打开的 `__packed` 文件 | 有限降级 | 空 `__packed` fallback 保持声明、跳转和补全可用 | 打开缓冲区不表达 packed 布局；布局必须看保存文件的 VFS 快照及 ARMCC5 |
+| packed 指针、已有类型限定、宏展开声明 | 未实现 | 仅转换明确的 struct/union 定义 | 复杂形式仍可能诊断，不能声称完整 ABI 等价 |
+| 宏 include、include_next、条件依赖和特殊搜索参数 | 未实现完整预处理 | 按 Clang 顺序扫描可解析的字面量 include | 可能漏掉实际依赖；非 UTF-8 的非 ASCII 头文件名也未保证支持 |
+| 工作区外或特殊扩展名头文件更新 | 部分覆盖 | 手动执行 `Refresh Keil Project` | 自动监听可能不刷新对应快照 |
+| VFS 历史副本 | 未回收 | 内容哈希避免覆盖原文件和半更新 | 长期编辑会增加工作区存储占用 |
+| 旧 cpptools 后端 | 保留上游行为 | 空宏、常量占位和 Target 级配置维持可编辑性 | packed、attribute、内建函数及逐文件配置语义可能失真，本次未整改 |
+| clangd 重构自测 | 上游工具缺陷/兼容问题未修复 | 保留失败并单独识别源码诊断 | 本机 clangd 23.1.0 在 2 个宏表达式上发生 SwapBinaryOperands 替换重叠，不能称完整检查全通过 |
+| 工具链参数与验收覆盖 | 未完成 | 未映射项显式告警，允许用户核验后通过 ExtraArgs 补充 | 编译器版本宏可能缺失；仍有 11 个既有 lint warning，0.1.3 尚未完成重载后的真实 VS Code 交互验收 |
 
 ## 当前兼容处理，不等于原生修复
 
@@ -87,14 +105,15 @@ C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/n
 | 仅在 clangd 命令中取消 `__CC_ARM` | 使用 CMSIS 的 GCC/Clang 实现 | 所有依赖该宏的代码都可能切换分支，不限于 CMSIS；编辑器不能检查被跳过的 ARMCC5 分支 |
 | 引入 Clang ACLE、启用 `__declspec` | 解析内建函数和部分库声明 | 只覆盖 Clang 支持的声明，不能证明 AC5 指令行为、属性和 ABI 完全一致 |
 | `__ARM_NO_DEPRECATED_FUNCTIONS=1` | 避开标准库中不支持的废弃寄存器返回声明 | 这些 API 的调用仍不支持；这是使用头文件的条件开关，不是实现了专有返回约定 |
-| packed 定义的 VFS 转换 | 保留所支持定义的紧凑布局及字节位置 | 只改编辑器所读副本；不能覆盖内存缓冲区和全部 AC5 语法 |
+| packed 定义的 VFS 转换与打开缓冲区 fallback | 保存文件保留所支持定义的紧凑布局；打开文件保持声明可解析 | VFS 只改编辑器所读副本；空宏路径不表达布局，也不能覆盖全部 AC5 语法 |
 | 旧 cpptools 空宏/常量占位 | 让部分代码可以补全和跳转 | 会丢失 packed、attribute、内建函数等语义；红线少不代表更准确 |
 
 以上处理均不进入 Keil 正式构建。涉及布局、寄存器、汇编和编译器分支时，按原源码和
 实际 UV4/ARMCC5 结果判断，不直接根据编辑器的自动修复建议改动固件。
 
-本轮独立配置目录中的 VS Code 集成检查停在工作区信任门槛，尚未完成新版交互验收；
-离线 clangd 检查和打包通过不代表这一项通过。具体结果与后续验收步骤见故障分析文档。
+0.1.3 VSIX 已安装到实际 `keil` Profile，但原 VS Code 窗口尚未重载并刷新工程；
+因此尚未把截图中的 Problems 面板消失记为通过。定向复现、单元测试、打包和安装
+分别有证据，但都不替代这项交互验收。具体结果与最小复验步骤见故障分析文档。
 
 ## 来源与许可
 
