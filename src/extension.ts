@@ -20,6 +20,14 @@ import { mergeCppProperties } from './project/cppProperties';
 import { ClangdBackend, ClangdProject, languageService } from './project/clangdBackend';
 import { formatPathValidationErrors, validateExecutionPaths } from './project/pathValidation';
 import { buildTreeItemId, findRevealPath, ProjectSortOrder, sortProjects } from './projectExplorer/treeState';
+import {
+    collectExcludeDirectories,
+    KeilTaskAction,
+    syncProjectWorkspaceFiles,
+    syncWorkspaceFolderSettings,
+    WorkspaceFileOptions,
+    WorkspaceProjectDefinition
+} from './project/workspaceFiles';
 
 // 添加一个消息防重复显示机制
 const messageDebouncer = new Map<string, number>();
@@ -92,13 +100,18 @@ export function activate(context: vscode.ExtensionContext) {
 
     const prjExplorer = new ProjectExplorer(context);
     context.subscriptions.push(prjExplorer); // Assuming ProjectExplorer might need disposal or is a provider
+    context.subscriptions.push(vscode.tasks.registerTaskProvider('keil-task', {
+        provideTasks: () => prjExplorer.provideTasks(),
+        resolveTask: task => prjExplorer.resolveTask(task)
+    }));
 
     // Listen for task termination to process diagnostics
     context.subscriptions.push(vscode.tasks.onDidEndTaskProcess(async (event) => {
         const task = event.execution.task;
         // Check if it's our Keil task and it's a build or rebuild
+        const action = task.definition.action || task.name;
         if (task.definition.type === 'keil-task' && 
-            (task.name === 'build' || task.name === 'rebuild') &&
+            (action === 'build' || action === 'rebuild') &&
             task.definition.prjID && task.definition.targetName) {
             
             const prjID = task.definition.prjID as string;
@@ -250,6 +263,8 @@ export function activate(context: vscode.ExtensionContext) {
     subscriber.push(vscode.commands.registerCommand('project.clearCacheAndRefresh', () => prjExplorer.refreshActiveProject(true)));
 
     subscriber.push(vscode.commands.registerCommand('project.revealCurrentFile', () => prjExplorer.revealCurrentEditor()));
+
+    subscriber.push(vscode.commands.registerCommand('keil.configureWorkspace', () => prjExplorer.configureWorkspaceFiles(true)));
 
     // 注册Chat Tools
     registerChatTools(context, prjExplorer);
@@ -667,6 +682,17 @@ class KeilProject implements IView, KeilProjectInfo {
         return this.targetList;
     }
 
+    getWorkspaceDefinition(): WorkspaceProjectDefinition {
+        return {
+            projectFile: this.uvprjFile.path,
+            projectName: this.label,
+            targets: this.targetList.map(target => ({
+                targetName: target.targetName,
+                generatedDirectories: target.getGeneratedDirectories()
+            }))
+        };
+    }
+
     private async loadFiles() {
         // ... existing code ...
         for (const file of this.files) {
@@ -989,17 +1015,39 @@ abstract class Target implements IView {
         return { projectFile: this.project.uvprjFile.path, targetName: this.targetName, target: this.targetDOM };
     }
 
+    public getGeneratedDirectories(): string[] {
+        const common = this.targetDOM?.TargetOption?.TargetCommonOption || {};
+        return [common.OutputDirectory, common.ListingPath]
+            .filter((value): value is string => typeof value === 'string' && value.trim() !== '');
+    }
+
     private quoteString(str: string, quote = '"'): string {
         return str.includes(' ') ? (quote + str + quote) : str;
     }
 
-    private runTask(name: string, commands: string[]) {
+    private getTaskCommands(action: KeilTaskAction): string[] {
+        switch (action) {
+            case 'build': return this.getBuildCommand();
+            case 'rebuild': return this.getRebuildCommand();
+            case 'download': return this.getDownloadCommand();
+        }
+    }
 
+    public createTask(
+        action: KeilTaskAction,
+        name: string = action,
+        scope: vscode.WorkspaceFolder | vscode.TaskScope.Global | vscode.TaskScope.Workspace = vscode.TaskScope.Workspace,
+        showValidationErrors = false,
+        definitionProjectFile = this.project.uvprjFile.path
+    ): vscode.Task | undefined {
         if (vscode.env.remoteName === 'wsl') {
-            showMessage('Keil Assistant 检测到当前 VS Code 运行在 WSL 会话中，Keil/UV4 只能在 Windows 环境执行。请在 Windows 会话下打开工程或将终端切换到 PowerShell/CMD。', 'error', 4000);
-            return;
+            if (showValidationErrors) {
+                showMessage('Keil Assistant 检测到当前 VS Code 运行在 WSL 会话中，Keil/UV4 只能在 Windows 环境执行。请在 Windows 会话下打开工程或将终端切换到 PowerShell/CMD。', 'error', 4000);
+            }
+            return undefined;
         }
 
+        const commands = this.getTaskCommands(action);
         const uv4PathIndex = commands.findIndex(value => value === '--uv4Path');
         const uv4Path = uv4PathIndex !== -1 ? commands[uv4PathIndex + 1] : '';
         const validation = validateExecutionPaths({
@@ -1012,8 +1060,10 @@ abstract class Target implements IView {
         if (!validation.ok) {
             const message = formatPathValidationErrors(validation.errors);
             this.project.logger.log(`[ERROR] Task '${name}' path validation failed:\n${message}`);
-            showMessage(message, 'error', 4000);
-            return;
+            if (showValidationErrors) {
+                showMessage(message, 'error', 4000);
+            }
+            return undefined;
         }
 
         const resManager = ResourceManager.getInstance();
@@ -1026,59 +1076,46 @@ abstract class Target implements IView {
         // instead of building a single command line string
         const builderExe = resManager.getBuilderExe();
 
-        // use task
+        const taskDefinition = {
+            type: 'keil-task',
+            prjID: this.project.prjID,
+            projectFile: definitionProjectFile,
+            targetName: this.targetName,
+            action
+        };
+        const task = new vscode.Task(taskDefinition, scope, name, 'keil-assistant');
+        task.execution = new vscode.ProcessExecution(builderExe, args, { cwd: this.project.uvprjFile.dir });
+        task.isBackground = false;
+        if (action === 'build') {
+            task.group = vscode.TaskGroup.Build;
+        }
+        task.detail = `${this.project.label} / ${this.targetName} / ${action}`;
+        task.presentationOptions = {
+            echo: false,
+            focus: false,
+            clear: true
+        };
+        return task;
+    }
+
+    private runTask(action: KeilTaskAction) {
         if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-
-            const taskDefinition = { 
-                type: 'keil-task', 
-                prjID: this.project.prjID,       // Add prjID to definition
-                targetName: this.targetName      // Add targetName to definition
-            };
-            // Using TaskScope.Workspace as project-specific details are in definition
-            const task = new vscode.Task(taskDefinition, vscode.TaskScope.Workspace, name, 'keil-assistant');
-            task.execution = new vscode.ProcessExecution(builderExe, args, { cwd: this.project.uvprjFile.dir });
-            task.isBackground = false;
-            // task.problemMatchers = this.getProblemMatcher(); // We will handle diagnostics manually
-
-            // Clear previous diagnostics for this project/target when a new build starts
-            diagnosticCollection.clear(); // Clears all diagnostics from this collection.
-                                          // More granular clearing might be needed if multiple projects are handled.
-
-            // Log debugging information for path resolution
-            this.project.logger.log(`[DEBUG] Task CWD for '${name}': '${this.project.uvprjFile.dir}'`);
-            const exampleCompilerPath = "..\\source\\main.c"; // Using a typical problematic path
-            try {
-                if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
-                    const resolvedPath = node_path.resolve(this.project.uvprjFile.dir, exampleCompilerPath);
-                    this.project.logger.log(`[DEBUG] Resolved absolute path for '${exampleCompilerPath}' (from CWD): '${resolvedPath}'`);
-                    const relativeToWorkspace = node_path.relative(workspaceRoot, resolvedPath);
-                    this.project.logger.log(`[DEBUG] Path relative to workspace for '${exampleCompilerPath}': '${relativeToWorkspace}'`);
-                } else {
-                    this.project.logger.log(`[DEBUG] No workspace folder found, cannot calculate relative path.`);
-                }
-            } catch (e: any) {
-                this.project.logger.log(`[DEBUG] Error during path resolution debug: ${e.message}`);
+            const task = this.createTask(action, action, vscode.TaskScope.Workspace, true);
+            if (!task) {
+                return;
             }
-
-            task.presentationOptions = {
-                echo: false,
-                focus: false,
-                clear: true
-            };
-            vscode.tasks.executeTask(task);
-
-            // After task execution, we'll need to parse the log and publish diagnostics.
-            // This will be handled by listening to onDidEndTaskProcess or similar.
-            // For now, let's add a placeholder for where this logic would be triggered.
-            // TODO: Implement log parsing and diagnostic publishing via onDidEndTaskProcess
-            // this.handleTaskCompletion(name); // This direct call will be removed/replaced
-
-
+            diagnosticCollection.clear();
+            this.project.logger.log(`[DEBUG] Task CWD for '${action}': '${this.project.uvprjFile.dir}'`);
+            void vscode.tasks.executeTask(task);
         } else {
+            const commands = this.getTaskCommands(action);
+            const task = this.createTask(action, action, vscode.TaskScope.Global, true);
+            if (!task || !(task.execution instanceof vscode.ProcessExecution)) {
+                return;
+            }
             // Fallback for when no workspace is available - use terminal
             const index = vscode.window.terminals.findIndex((ter) => {
-                return ter.name === name;
+                return ter.name === action;
             });
 
             if (index !== -1) {
@@ -1086,7 +1123,7 @@ abstract class Target implements IView {
                 vscode.window.terminals[index].dispose();
             }
 
-            const terminal = vscode.window.createTerminal(name);
+            const terminal = vscode.window.createTerminal(action);
             terminal.show();
             
             // Build command line for terminal execution
@@ -1095,6 +1132,8 @@ abstract class Target implements IView {
             const invokePrefix = isCmd ? '' : '& ';
             const cmdPrefixSuffix = isCmd ? '"' : '';
 
+            const builderExe = ResourceManager.getInstance().getBuilderExe();
+            const args = ['-o', this.uv4LogFile.path].concat(commands);
             let commandLine = invokePrefix + this.quoteString(builderExe, quote) + ' ';
             commandLine += args.map((arg) => { return this.quoteString(arg, quote); }).join(' ');
             
@@ -1103,15 +1142,15 @@ abstract class Target implements IView {
     }
 
     build() {
-        this.runTask('build', this.getBuildCommand());
+        this.runTask('build');
     }
 
     rebuild() {
-        this.runTask('rebuild', this.getRebuildCommand());
+        this.runTask('rebuild');
     }
 
     download() {
-        this.runTask('download', this.getDownloadCommand());
+        this.runTask('download');
     }
 
     updateSourceRefs() {
@@ -1937,6 +1976,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
     private rebuildStatusBarItem: vscode.StatusBarItem;
     private downloadStatusBarItem: vscode.StatusBarItem;
     private restoreExpandedStateTimer: NodeJS.Timeout | undefined;
+    private workspaceFilesTimer: NodeJS.Timeout | undefined;
 
     private extensionContext: vscode.ExtensionContext; // Store context
     private readonly clangdBackend: ClangdBackend;
@@ -1961,6 +2001,9 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
                         for (const target of project.getTargets()) { await target.load(); }
                     }
                     await this.currentActiveProject?.applyActiveCppConfiguration();
+                }
+                if (event.affectsConfiguration('KeilAssistant.Workspace')) {
+                    this.scheduleWorkspaceFilesSync();
                 }
                 this.updateView();
             } catch (error) { showMessage(String(error), 'error'); }
@@ -2017,6 +2060,73 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
 
     private getProjectExplorerConfig(): vscode.WorkspaceConfiguration {
         return vscode.workspace.getConfiguration('KeilAssistant.ProjectExplorer');
+    }
+
+    private getWorkspaceFileOptions(project: KeilProject): WorkspaceFileOptions {
+        const config = vscode.workspace.getConfiguration('KeilAssistant.Workspace', vscode.Uri.file(project.uvprjFile.path));
+        const validActions = new Set<KeilTaskAction>(['build', 'rebuild', 'download']);
+        return {
+            excludeDirectories: config.get<string[]>('ExcludeDirectories', ['.keil-assistant-clangd', 'Objects', 'Listings']),
+            generateTasks: config.get<boolean>('GenerateTasks', true),
+            taskActions: config.get<string[]>('TaskActions', ['build', 'rebuild'])
+                .filter((action): action is KeilTaskAction => validActions.has(action as KeilTaskAction))
+        };
+    }
+
+    private scheduleWorkspaceFilesSync(): void {
+        if (this.workspaceFilesTimer) {
+            clearTimeout(this.workspaceFilesTimer);
+        }
+        this.workspaceFilesTimer = setTimeout(() => {
+            void this.configureWorkspaceFiles(false);
+        }, 200);
+    }
+
+    async configureWorkspaceFiles(showSummary: boolean): Promise<void> {
+        const changedFiles: string[] = [];
+        const warnings: string[] = [];
+        const workspaceExcludes = new Map<string, Set<string>>();
+        for (const project of this.prjList.values()) {
+            const config = vscode.workspace.getConfiguration('KeilAssistant.Workspace', vscode.Uri.file(project.uvprjFile.path));
+            if (!showSummary && !config.get<boolean>('AutoConfigure', true)) {
+                continue;
+            }
+            const definition = project.getWorkspaceDefinition();
+            const options = this.getWorkspaceFileOptions(project);
+            const result = syncProjectWorkspaceFiles(definition, options);
+            changedFiles.push(...result.changedFiles);
+            warnings.push(...result.warnings);
+
+            const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.uvprjFile.path));
+            if (folder && node_path.normalize(folder.uri.fsPath) !== node_path.normalize(project.uvprjFile.dir)) {
+                const projectPrefix = node_path.relative(folder.uri.fsPath, project.uvprjFile.dir).split(node_path.sep).join('/');
+                const exclusions = workspaceExcludes.get(folder.uri.fsPath) || new Set<string>();
+                for (const directory of collectExcludeDirectories(definition, options.excludeDirectories)) {
+                    exclusions.add(`${projectPrefix}/${directory}`);
+                }
+                workspaceExcludes.set(folder.uri.fsPath, exclusions);
+            }
+            for (const file of result.changedFiles) {
+                project.logger.log(`[INFO] Workspace file updated: ${file}`);
+            }
+            for (const warning of result.warnings) {
+                project.logger.log(`[WARN] Workspace file not updated: ${warning}`);
+            }
+        }
+
+        for (const [folder, exclusions] of workspaceExcludes) {
+            const result = syncWorkspaceFolderSettings(folder, Array.from(exclusions).sort());
+            changedFiles.push(...result.changedFiles);
+            warnings.push(...result.warnings);
+        }
+
+        if (warnings.length) {
+            showMessage(`部分 VS Code 工程配置未更新：\n${warnings.join('\n')}`, 'warning', 6000);
+        } else if (showSummary) {
+            showMessage(changedFiles.length
+                ? `已更新 ${changedFiles.length} 个 VS Code 工程配置文件。`
+                : '所有 Keil 工程的 VS Code 配置均已是最新。', 'info', 3000);
+        }
     }
 
     private shouldRememberExpandedState(): boolean {
@@ -2289,6 +2399,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
         await this.currentActiveProject.applyActiveCppConfiguration();
         this.updateView();
         this.updateStatusBarVisibility();
+        this.scheduleWorkspaceFilesSync();
         if (persist) {
             this.persistActiveProject(project);
         }
@@ -2308,7 +2419,10 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
         const nPrj = new KeilProject(new File(path), this.extensionContext); 
         if (!this.prjList.has(nPrj.prjID)) {
             await nPrj.load();
-            nPrj.on('dataChanged', () => this.updateView());
+            nPrj.on('dataChanged', () => {
+                this.updateView();
+                this.scheduleWorkspaceFilesSync();
+            });
             this.prjList.set(nPrj.prjID, nPrj);
             // Always activate the newly opened project to match user intent
             await this.setActiveProject(nPrj, persistActive);
@@ -2486,6 +2600,7 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
                 }
                 await prj.setActiveTarget(targetName);
                 this.updateView();
+                this.scheduleWorkspaceFilesSync();
             }
         }
     }
@@ -2507,6 +2622,74 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
                 showMessage('Not found any active project !', 'warning');
             }
         }
+    }
+
+    private getProjectByFilePath(projectFile: string): KeilProject | undefined {
+        const normalized = node_path.normalize(projectFile).toLowerCase();
+        return Array.from(this.prjList.values()).find(project =>
+            node_path.normalize(project.uvprjFile.path).toLowerCase() === normalized);
+    }
+
+    private expandWorkspaceFolderVariable(projectFile: string, task: vscode.Task): string {
+        if (!projectFile.startsWith('${workspaceFolder}')) {
+            return projectFile;
+        }
+        const scope = task.scope;
+        if (scope && typeof scope === 'object' && 'uri' in scope) {
+            return node_path.join(scope.uri.fsPath, projectFile.slice('${workspaceFolder}'.length).replace(/^[\\/]+/, ''));
+        }
+        const folder = vscode.workspace.workspaceFolders?.find(candidate =>
+            fs.existsSync(node_path.join(candidate.uri.fsPath, projectFile.slice('${workspaceFolder}'.length).replace(/^[\\/]+/, ''))));
+        return folder
+            ? node_path.join(folder.uri.fsPath, projectFile.slice('${workspaceFolder}'.length).replace(/^[\\/]+/, ''))
+            : projectFile;
+    }
+
+    async provideTasks(): Promise<vscode.Task[]> {
+        const tasks: vscode.Task[] = [];
+        for (const project of this.prjList.values()) {
+            const options = this.getWorkspaceFileOptions(project);
+            if (!options.generateTasks) {
+                continue;
+            }
+            for (const target of project.getTargets()) {
+                for (const action of options.taskActions) {
+                    const actionTitle = action === 'build' ? 'Build' : action === 'rebuild' ? 'Rebuild' : 'Download';
+                    const name = `Keil: ${actionTitle} ${project.label} / ${target.targetName}`;
+                    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.uvprjFile.path));
+                    const definitionProjectFile = folder
+                        && node_path.normalize(folder.uri.fsPath) === node_path.normalize(project.uvprjFile.dir)
+                        ? '${workspaceFolder}/' + node_path.basename(project.uvprjFile.path)
+                        : project.uvprjFile.path;
+                    const task = target.createTask(action, name, vscode.TaskScope.Workspace, false, definitionProjectFile);
+                    if (task) {
+                        tasks.push(task);
+                    }
+                }
+            }
+        }
+        return tasks;
+    }
+
+    async resolveTask(task: vscode.Task): Promise<vscode.Task | undefined> {
+        const action = task.definition.action as KeilTaskAction | undefined;
+        if (!action || !['build', 'rebuild', 'download'].includes(action)) {
+            return undefined;
+        }
+        const rawProjectFile = String(task.definition.projectFile || '');
+        const projectFile = this.expandWorkspaceFolderVariable(rawProjectFile, task);
+        const project = (task.definition.prjID && this.getProjectById(String(task.definition.prjID)))
+            || this.getProjectByFilePath(projectFile);
+        const target = project?.getTargetByName(String(task.definition.targetName || ''));
+        if (!target) {
+            return undefined;
+        }
+        const scope = task.scope || vscode.TaskScope.Workspace;
+        const resolved = target.createTask(action, task.name, scope, false, rawProjectFile || project.uvprjFile.path);
+        if (resolved && task.group) {
+            resolved.group = task.group;
+        }
+        return resolved;
     }
 
     updateView() {
@@ -2629,6 +2812,9 @@ class ProjectExplorer implements vscode.TreeDataProvider<IView>, vscode.Disposab
         // TreeDataProvider and Commands pushed to context.subscriptions are disposed by VSCode.
         if (this.restoreExpandedStateTimer) {
             clearTimeout(this.restoreExpandedStateTimer);
+        }
+        if (this.workspaceFilesTimer) {
+            clearTimeout(this.workspaceFilesTimer);
         }
         this.treeView.dispose();
         this.buildStatusBarItem.dispose();

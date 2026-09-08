@@ -47,6 +47,7 @@ terms. Runtime dependency license texts remain included when bundled.
 
 ## Bundled runtime dependencies
 
+- jsonc-parser: MIT, `LICENSES/jsonc-parser-MIT.txt` (https://github.com/microsoft/node-jsonc-parser).
 - xml2js: MIT, `LICENSES/xml2js-MIT.txt` (https://github.com/Leonidas-from-XIV/node-xml2js).
 - xmlbuilder: MIT, `LICENSES/xmlbuilder-MIT.txt` (https://github.com/oozcitak/xmlbuilder-js).
 - sax: ISC, `LICENSES/sax-license.txt` (https://github.com/isaacs/sax-js).

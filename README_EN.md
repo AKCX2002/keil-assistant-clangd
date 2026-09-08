@@ -4,7 +4,7 @@ Unofficial personal-use modifications by AKCX2002, based on ruiwarn/keil-assista
 (82e1516, MIT) and selected compilation-database logic from huiyi-li/keil2clangd
 (5281918, Apache-2.0). Not endorsed by Arm, Keil, LLVM, Microsoft or upstream authors.
 
-**0.1.4 is a preview. Neither clangd nor Microsoft C/C++ provides native ARMCC5
+**0.1.5 is a preview. Neither clangd nor Microsoft C/C++ provides native ARMCC5
 equivalence. Keil build results remain authoritative.** Firmware source/project
 files and UV4 build/download commands are unchanged by these editor adaptations.
 
@@ -21,6 +21,18 @@ compilation database beside the active project is generated and updated by this
 extension. AC5 adaptation snapshots stay in its `.keil-assistant-clangd` subdirectory.
 Shared sources use the active project's command. Conflicting compile-commands-dir
 settings are reported.
+
+For every loaded Keil project, the extension safely merges project-local
+`.vscode/settings.json` exclusions for its cache, the usual Objects/Listings folders,
+and output/listing directories declared by the project. Existing user values win.
+It can also generate managed `.vscode/tasks.json` entries for every Target. Build and
+Rebuild are enabled by default; Download is opt-in because it affects a real device.
+User tasks are retained. The same tasks are exposed through VS Code's native task picker
+and `Ctrl+Shift+B`, including when the open workspace is a parent of several projects.
+For such parent workspaces, prefixed exclusion rules are also merged into the active
+workspace folder settings so they take effect immediately. The Keil project-view title
+also has a native active-Target Build action. See
+`KeilAssistant.Workspace.*` settings to control automatic files, exclusions and actions.
 
 AC6 is the primary target. AC5 support is an approximation: legacy assembly and
 proprietary language extensions are not fully supported. C51/C251 need cpptools.

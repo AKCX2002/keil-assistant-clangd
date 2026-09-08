@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5 (preview)
+
+- Safely merge `.vscode/settings.json` beside every loaded Keil project, preserving
+  user settings while excluding configured, output, listing and clangd cache directories.
+- Optionally generate managed `tasks.json` entries for build, rebuild and download;
+  disabling the feature removes only extension-owned tasks.
+- Expose loaded targets through the native VS Code task picker and build-task command,
+  and add an active-target Build button to the Keil project view title.
+
 ## 0.1.4 (preview)
 
 - Generate `compile_commands.json` beside the active Keil project instead of in

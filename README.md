@@ -4,7 +4,7 @@
 非官方项目，不代表 Arm、Keil、LLVM、Microsoft 或上游作者；不承诺持续维护或商业支持。
 扩展标识为 **AKCX2002.keil-assistant-clangd**，不是上游 Marketplace 版本。
 
-**当前版本 0.1.4 仍为预览版：clangd 和 Microsoft C/C++ 都不能替代 ARMCC5 编译验收。**
+**当前版本 0.1.5 仍为预览版：clangd 和 Microsoft C/C++ 都不能替代 ARMCC5 编译验收。**
 本次修复针对编辑器解析错误，不修改固件源码、`.uvprojx` 或 UV4 构建/下载命令。
 详细见 [本次故障原因与修复总结](docs/AC5_DIAGNOSTICS.md)、[已知缺陷与兼容处理](docs/KNOWN_LIMITATIONS.md)。
 
@@ -40,6 +40,27 @@ C/C++ IntelliSense，避免两套语言服务重复工作。切换回 cpptools/n
 | KeilAssistant.Clangd.ExtraArgs | 追加已核验的 Clang 参数，每个数组元素一个参数 |
 | KeilAssistant.Clangd.CStandard | 自动解析工程或显式指定 C 标准 |
 | KeilAssistant.Clangd.CppStandard | 自动解析工程或显式指定 C++ 标准 |
+
+### 每个 Keil 工程的 VS Code 配置
+
+插件加载或刷新工程时，会在每个 `.uvproj/.uvprojx` 同目录安全合并：
+
+- `.vscode/settings.json`：把 `.keil-assistant-clangd`、`Objects`、`Listings` 及工程 XML
+  中实际的输出/列表目录加入文件、搜索和监听排除；已有键和值不覆盖。
+- `.vscode/tasks.json`：默认生成各 Target 的 Build、Rebuild 任务；只维护
+  `keilAssistantManaged` 标记的条目，用户任务原样保留。Download 涉及真实设备，默认不生成。
+
+这些任务同时进入 VS Code 原生任务列表，可用 `Ctrl+Shift+B` 或“终端 → 运行生成任务”选择；
+Keil 工程视图标题栏也提供活动 Target 的 Build 按钮。打开多个工程的上级目录时，任务提供器
+仍会列出所有已加载工程，不依赖嵌套 `.vscode/tasks.json` 是否被当前工作区直接读取；插件还会
+把带工程相对前缀的排除规则安全合并到当前工作区文件夹的 `.vscode/settings.json`，使排除立即生效。
+
+| 设置 | 用途 |
+| --- | --- |
+| KeilAssistant.Workspace.AutoConfigure | 自动维护各工程 `.vscode` 文件；关闭后仍可手动执行配置命令 |
+| KeilAssistant.Workspace.ExcludeDirectories | 追加要隐藏并停止搜索/监听的工程相对目录 |
+| KeilAssistant.Workspace.GenerateTasks | 生成并提供原生 Keil 任务；关闭时保留所有用户任务 |
+| KeilAssistant.Workspace.TaskActions | build / rebuild / download；默认仅 build、rebuild |
 
 路径可为绝对路径或相对 .uvprojx 的路径。ExtraArgs 在生成参数之后应用，例如
 -mfpu=fpv4-sp-d16、-mfloat-abi=hard；必须对应实际工程，不能照抄不匹配的 CPU 配置。
@@ -131,7 +152,7 @@ packed VFS 快照后的二次错误。
 ## 开发
 
 使用 Node.js 22.12 或更新版本：npm ci → npm test → npm run package。
-产出 keil-assistant-clangd-0.1.4.vsix。测试覆盖编译参数、文件排除、目标合并和上游回归。
+产出 keil-assistant-clangd-0.1.5.vsix。测试覆盖编译参数、文件排除、目标合并和上游回归。
 编译输入限定为 src/lib，测试只收集 dist/src/test；artifacts 下的参考仓库不参与发布构建。
 真实编译器与编辑器验证范围以对应 Release 说明为准，不将单元测试视为完整固件验收。
 

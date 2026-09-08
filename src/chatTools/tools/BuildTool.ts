@@ -108,9 +108,10 @@ export class BuildTool extends KeilChatTool {
 
                 const disposable = vscode.tasks.onDidEndTaskProcess((event: any) => {
                     const task = event.execution.task;
+                    const action = task.definition.action || task.name;
                     // 检查是否是我们的编译任务
                     if (task.definition.type === 'keil-task' &&
-                        (task.name === 'build' || task.name === 'rebuild') &&
+                        (action === 'build' || action === 'rebuild') &&
                         task.definition.prjID === activeProject.prjID &&
                         task.definition.targetName === targetObj.targetName) {
                         
